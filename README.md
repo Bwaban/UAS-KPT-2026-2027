@@ -205,3 +205,29 @@ Gunakan struktur berikut untuk penyusunan laporan UAS sesuai instruksi Bagian C:
 4. **Implementasi:** Penjelasan kode utama `matrix_mul_mpi.py` dan alur eksekusi master-worker.
 5. **Pengujian dan Analisis Performansi:** Penyajian tabel data eksperimen $P \in \{1, 2, 4, 8, 16\}$, grafik speedup, grafik efisiensi, grafik breakdown bottleneck komunikasi, serta hasil uji fault tolerance.
 6. **Kesimpulan & Saran:** Rangkuman temuan titik jenuh prosesor (*diminishing returns* akibat overhead komunikasi) dan saran optimasi lanjutan (misal: hybrid MPI+OpenMP atau algoritma Cannon 2D).
+
+---
+
+## 🖥️ Dashboard MPI Matrix Lab
+
+Repositori ini juga menyertakan antarmuka web React untuk memantau dan mensimulasikan benchmark:
+
+```bash
+npm install
+npm run dev
+```
+
+Buka alamat lokal yang ditampilkan Vite. Dashboard berjalan menggunakan data mock secara default; tombol eksperimen dan simulasi fault tolerance menggerakkan status, log, progres, serta ringkasan hasil di browser.
+
+### Menghubungkan backend FastAPI
+
+Salin `.env.example` menjadi `.env.local`, lalu atur alamat API:
+
+```env
+VITE_USE_MOCK=false
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Lapisan API berada di `src/lib/api.ts` dan menggunakan endpoint `GET /api/results`, `POST /api/run`, `POST /api/benchmark`, `POST /api/fault`, serta WebSocket `/ws/log`. Sesuaikan payload atau bentuk respons di berkas tersebut bila kontrak backend berbeda. Untuk pengembangan tanpa backend, biarkan `VITE_USE_MOCK=true`.
+
+Build produksi dapat diperiksa dengan `npm run build`.

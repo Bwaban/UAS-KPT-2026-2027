@@ -36,6 +36,12 @@ ENV/
 *.swp
 *.swo
 
+# JavaScript dependencies and build artifacts
+node_modules/
+*.tsbuildinfo
+.env*
+!.env.example
+
 # Large binary matrix files (if created via --save)
 *.npy
 
