@@ -1,13 +1,38 @@
 import { useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { CheckCircle2, FileCheck2, StopCircle } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, Info, StopCircle } from "lucide-react";
 import type { ExperimentParams, RunSummary } from "../types";
 import { api } from "../lib/api";
 import { formatNumber, formatPercent, formatSeconds } from "../lib/utils";
-import { CommandPreview, FormError, PageHeader, ParamForm, ProgressBar, RunButton, StageStepper, LogTerminal } from "../components/UI";
+import {
+  CommandPreview,
+  FormError,
+  LogTerminal,
+  PageHeader,
+  ParamForm,
+  ProgressBar,
+  RunButton,
+  StageStepper,
+} from "../components/UI";
 
-const initialParams: ExperimentParams = { mode: "single", size: 4096, processes: [4], seed: 42, csvPath: "results/benchmark_results.csv", verify: true, save: false };
-const stageNames = ["Inisialisasi matriks A dan B", "Broadcast matriks B", "Scatterv baris matriks A", "Perkalian matriks lokal", "Gatherv hasil matriks C", "Verifikasi hasil numerik"];
+const initialParams: ExperimentParams = {
+  mode: "single",
+  size: 4096,
+  processes: [4],
+  seed: 42,
+  csvPath: "results/benchmark_results.csv",
+  verify: true,
+  save: false,
+};
+
+const stageNames = [
+  "Inisialisasi matriks A dan B",
+  "Broadcast matriks B",
+  "Scatterv baris matriks A",
+  "Perkalian matriks lokal",
+  "Gatherv hasil matriks C",
+  "Verifikasi hasil numerik",
+];
 
 export default function RunExperiment() {
   const location = useLocation();
@@ -22,58 +47,184 @@ export default function RunExperiment() {
   const [summary, setSummary] = useState<RunSummary | null>(null);
   const [error, setError] = useState("");
   const cancelRef = useRef(false);
+
   const command = useMemo(() => {
-    if (params.mode === "benchmark") return `python src/benchmark_runner.py --processes ${params.processes.join(" ")} --size ${params.size}`;
-    return `mpiexec -n ${params.processes[0]} python src/matrix_mul_mpi.py --size ${params.size} --seed ${params.seed}${params.csvPath ? ` --csv ${params.csvPath}` : ""}${params.verify ? " --verify" : ""}${params.save ? " --save" : ""}`;
+    if (params.mode === "benchmark")
+      return `python src/benchmark_runner.py --processes ${params.processes.join(" ")} --size ${params.size}`;
+    return `mpiexec -n ${params.processes[0]} python src/matrix_mul_mpi.py --size ${params.size} --seed ${params.seed}${
+      params.csvPath ? ` --csv ${params.csvPath}` : ""
+    }${params.verify ? " --verify" : ""}${params.save ? " --save" : ""}`;
   }, [params]);
-  const append = (message: string) => setLogs((current) => [...current, `${new Date().toLocaleTimeString("id-ID", { hour12: false })}  ${message}`]);
+
+  const append = (message: string) =>
+    setLogs((current) => [...current, `${new Date().toLocaleTimeString("id-ID", { hour12: false })}  ${message}`]);
 
   const run = async () => {
-    setRunning(true); setProgress(0); setStage(0); setSummary(null); setError(""); setLogs([]); cancelRef.current = false;
+    setRunning(true);
+    setProgress(0);
+    setStage(0);
+    setSummary(null);
+    setError("");
+    setLogs([]);
+    cancelRef.current = false;
     let disconnectLogs: () => void = () => {};
     try {
       disconnectLogs = api.connectLogs((line) => setLogs((current) => [...current, line]));
       for (let index = 0; index < stageNames.length; index += 1) {
-        if (cancelRef.current) { append("[galat] Eksekusi dibatalkan oleh pengguna."); setStage(index); return; }
+        if (cancelRef.current) {
+          append("[galat] Eksekusi dibatalkan oleh pengguna.");
+          setStage(index);
+          return;
+        }
         setStage(index);
         append(`[mpi] ${stageNames[index]}...`);
-        await new Promise((resolve) => window.setTimeout(resolve, params.mode === "benchmark" ? 550 : 430));
-        if (cancelRef.current) { append("[galat] Eksekusi dibatalkan oleh pengguna."); return; }
+        await new Promise((resolve) => window.setTimeout(resolve, params.mode === "benchmark" ? 480 : 380));
+        if (cancelRef.current) {
+          append("[galat] Eksekusi dibatalkan oleh pengguna.");
+          return;
+        }
         append(`[✓] ${stageNames[index]} selesai.`);
         setProgress(Math.round(((index + 1) / stageNames.length) * 100));
       }
-      const result = params.mode === "benchmark" ? await api.benchmark(params).then((rows) => {
-        const row = rows[rows.length - 1];
-        if (!row) throw new Error("Tidak ada konfigurasi benchmark yang berhasil dijalankan.");
-        return { total: row.t_total_s, communication: row.comm_percent, gflops: row.throughput_gflops, verified: params.verify };
-      }) : await api.run(params);
+      const result =
+        params.mode === "benchmark"
+          ? await api.benchmark(params).then((rows) => {
+              const row = rows[rows.length - 1];
+              if (!row) throw new Error("Tidak ada konfigurasi benchmark yang berhasil dijalankan.");
+              return {
+                total: row.t_total_s,
+                communication: row.comm_percent,
+                gflops: row.throughput_gflops,
+                verified: params.verify,
+              };
+            })
+          : await api.run(params);
       setSummary(result);
       append(`[✓] Selesai · T_total ${formatSeconds(result.total)} · ${formatNumber(result.gflops, 1)} GFLOPS`);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Terjadi kesalahan saat menjalankan eksperimen.";
-      setError(message); append(`[galat] ${message}`);
-    } finally { disconnectLogs(); setRunning(false); }
+      setError(message);
+      append(`[galat] ${message}`);
+    } finally {
+      disconnectLogs();
+      setRunning(false);
+    }
   };
-  const cancel = () => { cancelRef.current = true; };
-  return <div className="page run-page">
-    <PageHeader eyebrow="EKSEKUSI TERDISTRIBUSI" title="Jalankan eksperimen" description="Atur parameter komputasi, lalu pantau setiap tahap eksekusi MPI." actions={<Link className="button-secondary" to="/hasil">Lihat hasil tersimpan</Link>} />
-    <div className="run-layout">
-      <div className="run-controls">
-        <section className="panel form-panel"><div className="panel-heading"><div><h2>Parameter eksperimen</h2><p>Pilih ukuran dan konfigurasi proses</p></div><span className="step-count">01</span></div>
-          <ParamForm value={params} onChange={setParams} disabled={running} />
-        </section>
-        <CommandPreview command={command} />
-        <div className="run-actions"><RunButton onClick={run} busy={running} disabled={params.processes.length === 0}>Jalankan eksperimen</RunButton>{running && <button className="button-danger-ghost" onClick={cancel}><StopCircle size={16} /> Batalkan</button>}</div>
-        {error && <FormError message={`${error}. Periksa konfigurasi MPI dan koneksi backend, lalu coba lagi.`} />}
-        <p className="helper-text"><FileCheck2 size={14} /> Data mode mock digunakan untuk pratinjau; hubungkan FastAPI untuk menjalankan MPI sungguhan.</p>
-      </div>
-      <div className="run-monitor">
-        <section className="panel run-progress-panel"><div className="panel-heading"><div><h2>Progres eksekusi</h2><p>{running ? "Eksperimen sedang berjalan" : summary ? "Eksperimen selesai" : "Siap menunggu perintah"}</p></div><span className={`run-state ${running ? "running" : summary ? "done" : ""}`}>{running ? "Berjalan" : summary ? "Selesai" : "Siap"}</span></div>
-          <StageStepper current={stage < 0 ? 0 : stage + (summary ? 1 : 0)} error={Boolean(error)} /><div className="progress-caption"><span>Progres</span><strong>{progress}%</strong></div><ProgressBar value={progress} tone={summary ? "teal" : "indigo"} />
-        </section>
-        <LogTerminal lines={logs} running={running} />
-        {summary && <section className="result-summary"><div className="summary-title"><CheckCircle2 size={18} /><h2>Ringkasan hasil</h2></div><div className="summary-metrics"><div><small>Waktu total</small><strong className="metric-indigo">{formatSeconds(summary.total)}</strong></div><div><small>Komunikasi</small><strong className="metric-comm">{formatPercent(summary.communication)}</strong></div><div><small>Throughput</small><strong>{formatNumber(summary.gflops, 1)} <small>GFLOPS</small></strong></div><div><small>Validasi</small><strong className={summary.verified ? "metric-compute" : ""}>{summary.verified ? "Lulus" : "Tidak aktif"}</strong></div></div></section>}
+
+  const cancel = () => {
+    cancelRef.current = true;
+  };
+
+  return (
+    <div className="page run-page">
+      <PageHeader
+        title="Jalankan eksperimen"
+        description="Konfigurasi dimensi matriks, jumlah proses MPI, dan pantau setiap fase kolektif."
+        actions={
+          <Link className="button-secondary" to="/hasil">
+            <span>Hasil tersimpan</span>
+            <ArrowUpRight size={14} strokeWidth={1.6} />
+          </Link>
+        }
+      />
+
+      <div className="run-layout">
+        <div className="run-controls">
+          <section className="panel form-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Parameter komputasi</h2>
+                <p>Pilih mode eksekusi dan alokasi proses</p>
+              </div>
+            </div>
+            <ParamForm value={params} onChange={setParams} disabled={running} />
+          </section>
+
+          <CommandPreview command={command} />
+
+          <div className="run-actions">
+            <RunButton onClick={run} busy={running} disabled={params.processes.length === 0}>
+              {running ? "Menjalankan..." : "Jalankan eksperimen"}
+            </RunButton>
+            {running && (
+              <button type="button" className="button-danger-ghost" onClick={cancel}>
+                <StopCircle size={15} strokeWidth={1.6} />
+                <span>Batalkan</span>
+              </button>
+            )}
+          </div>
+
+          {error && (
+            <FormError message={`${error}. Periksa konfigurasi MPI dan koneksi backend, lalu coba lagi.`} />
+          )}
+
+          <p className="helper-text">
+            <Info size={14} strokeWidth={1.6} />
+            <span>Mode mock aktif untuk pratinjau UI; atur VITE_USE_MOCK=false untuk backend FastAPI.</span>
+          </p>
+        </div>
+
+        <div className="run-monitor">
+          <section className="panel run-progress-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Progres eksekusi</h2>
+                <p>
+                  {running
+                    ? "Tahap MPI sedang berjalan"
+                    : summary
+                      ? "Seluruh fase komputasi selesai"
+                      : "Menunggu eksekusi"}
+                </p>
+              </div>
+              <span className={`run-state mono ${running ? "running" : summary ? "done" : ""}`}>
+                {running ? "Berjalan" : summary ? "Selesai" : "Siap"}
+              </span>
+            </div>
+
+            <StageStepper current={stage < 0 ? 0 : stage + (summary ? 1 : 0)} error={Boolean(error)} />
+
+            <div className="progress-caption">
+              <span>Progres keseluruhan</span>
+              <strong className="mono">{progress}%</strong>
+            </div>
+            <ProgressBar value={progress} tone={summary ? "compute" : "accent"} />
+          </section>
+
+          <LogTerminal lines={logs} running={running} />
+
+          {summary && (
+            <section className="result-summary">
+              <div className="summary-title">
+                <CheckCircle2 size={16} strokeWidth={1.8} />
+                <h2>Ringkasan hasil</h2>
+              </div>
+              <div className="summary-metrics">
+                <div>
+                  <small>Waktu total</small>
+                  <strong className="mono">{formatSeconds(summary.total)}</strong>
+                </div>
+                <div>
+                  <small>Komunikasi</small>
+                  <strong className="metric-comm mono">{formatPercent(summary.communication)}</strong>
+                </div>
+                <div>
+                  <small>Throughput</small>
+                  <strong className="mono">
+                    {formatNumber(summary.gflops, 1)} <small>GFLOPS</small>
+                  </strong>
+                </div>
+                <div>
+                  <small>Validasi</small>
+                  <strong className={summary.verified ? "metric-compute" : ""}>
+                    {summary.verified ? "Lulus" : "Tidak aktif"}
+                  </strong>
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
-  </div>;
+  );
 }

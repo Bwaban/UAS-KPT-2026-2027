@@ -49,12 +49,13 @@ export const benchmarkData: BenchmarkRow[] = [
 ];
 
 export const processOptions = [1, 2, 4, 8, 16];
+
 export const chartColors = {
-  total: "#6C7BFF",
-  compute: "#2DD4BF",
-  communication: "#FF9F43",
-  ideal: "#FFD166",
-  danger: "#FF5C7A",
+  total: "#0EA5E9",
+  compute: "#10B981",
+  communication: "#F59E0B",
+  ideal: "#71717A",
+  danger: "#F43F5E",
 };
 
 export const recentRuns = [
