@@ -1015,6 +1015,10 @@ button:disabled {
   border-radius: 8px;
 }
 
+.segmented-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .segmented button {
   height: 32px;
   background: transparent;
@@ -2250,6 +2254,9 @@ button:disabled {
   .fault-control-row,
   .summary-metrics {
     grid-template-columns: 1fr;
+  }
+  .segmented-4 {
+    grid-template-columns: 1fr 1fr;
   }
   .panel-heading {
     flex-direction: column;

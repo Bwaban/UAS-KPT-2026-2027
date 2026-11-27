@@ -16,8 +16,8 @@ import {
 import { FileImage, FileSpreadsheet, SlidersHorizontal } from "lucide-react";
 import { api } from "../lib/api";
 import { chartColors, processOptions } from "../data/mock";
-import type { BenchmarkRow } from "../types";
-import { formatNumber } from "../lib/utils";
+import type { BenchmarkRow, ExtraMetrics } from "../types";
+import { formatNumber, formatPercent, formatSeconds } from "../lib/utils";
 import {
   ChartCard,
   EmptyState,
@@ -28,33 +28,43 @@ import {
   Skeleton,
 } from "../components/UI";
 
-type ChartTab = "time" | "speedup" | "efficiency" | "bottleneck";
+type ChartTab = "time" | "speedup" | "efficiency" | "bottleneck" | "weak" | "latency" | "hybrid";
 const tabs: { id: ChartTab; label: string }[] = [
   { id: "time", label: "Waktu vs core" },
   { id: "speedup", label: "Speedup" },
   { id: "efficiency", label: "Efisiensi" },
   { id: "bottleneck", label: "Bottleneck" },
+  { id: "weak", label: "Weak scaling" },
+  { id: "latency", label: "Latency" },
+  { id: "hybrid", label: "Hybrid MPI+OMP" },
 ];
 
 export default function Results() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<BenchmarkRow[] | null>(null);
+  const [extra, setExtra] = useState<ExtraMetrics | null>(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<ChartTab>("time");
-  const [matrixSize, setMatrixSize] = useState(2048);
+  const [matrixSize, setMatrixSize] = useState(4096);
   const [source, setSource] = useState("results/benchmark_summary.csv");
   const [scale, setScale] = useState<"linear" | "log">("linear");
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api
-      .getResults()
-      .then(setRows)
+      .getResults(source)
+      .then((data) => {
+        setRows(data);
+        if (data.length && !data.some((r) => r.matrix_size === matrixSize)) {
+          setMatrixSize(Math.max(...data.map((r) => r.matrix_size)));
+        }
+      })
       .catch((reason: Error) => {
         setError(reason.message);
         setRows([]);
       });
-  }, []);
+    api.getExtra().then(setExtra).catch(() => {});
+  }, [source]);
 
   const filtered = useMemo(() => (rows ?? []).filter((row) => row.matrix_size === matrixSize), [matrixSize, rows]);
   const displayedRows = useMemo(
@@ -81,6 +91,17 @@ export default function Results() {
   );
 
   const chartData = filtered.map((row) => ({ proses: `P=${row.processes}`, ...row, ideal: row.processes }));
+  const weakData = (extra?.weak_scaling ?? []).map((row) => ({
+    label: `P=${row.processes} (${row.matrix_size})`,
+    ...row,
+    ideal: row.processes,
+  }));
+  const latencyData = extra?.latency ?? [];
+  const hybridData = (extra?.hybrid ?? []).map((row) => ({
+    config: `${row.mpi_procs} MPI × ${row.omp_threads} OMP`,
+    ...row,
+  }));
+
   const commBottleneck = filtered.find((row) => row.comm_percent > 25 && row.efficiency < 0.7);
   const latestFiltered = filtered[filtered.length - 1];
 
@@ -159,7 +180,69 @@ export default function Results() {
     link.click();
   };
 
+  const tooltipStyle = {
+    background: "var(--surface-raised)",
+    border: "1px solid var(--border-strong)",
+    borderRadius: 8,
+    color: "var(--text-main)",
+    fontSize: 12,
+    fontFamily: "Geist Mono, monospace",
+  };
+  const tick = { fill: "var(--text-muted)", fontSize: 11, fontFamily: "Geist Mono, monospace" };
+
   const chartContent = () => {
+    if (tab === "weak") {
+      if (!weakData.length)
+        return <EmptyState title="Data weak scaling belum tersedia" description="Jalankan benchmark_runner.py untuk merekam data weak scaling." />;
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={weakData} margin={{ top: 12, right: 12, left: -12, bottom: 0 }}>
+            <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={tick} />
+            <YAxis tick={tick} tickLine={false} axisLine={false} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [formatNumber(value, 3), name]} />
+            <Line dataKey="t_total_s" name="Waktu total (dtk)" stroke={chartColors.total} strokeWidth={2.2} dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.total }} />
+            <Line dataKey="gustafson_speedup" name="Gustafson speedup" stroke={chartColors.compute} strokeWidth={2} dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.compute }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (tab === "latency") {
+      if (!latencyData.length)
+        return <EmptyState title="Data latency belum tersedia" description="Jalankan mpiexec -n 2 python src/latency_benchmark.py." />;
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={latencyData} margin={{ top: 12, right: 12, left: -4, bottom: 0 }}>
+            <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="size_label" tickLine={false} axisLine={false} tick={tick} />
+            <YAxis yAxisId="bw" tick={tick} tickLine={false} axisLine={false} />
+            <YAxis yAxisId="lat" orientation="right" tick={tick} tickLine={false} axisLine={false} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [formatNumber(value, 3), name]} />
+            <Bar yAxisId="bw" dataKey="bandwidth_mbps" name="Bandwidth (MB/s)" fill={chartColors.total} radius={[4, 4, 0, 0]} />
+            <Line yAxisId="lat" dataKey="latency_ms" name="Latency (ms)" stroke={chartColors.communication} strokeWidth={2.2} dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.communication }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (tab === "hybrid") {
+      if (!hybridData.length)
+        return <EmptyState title="Data hybrid belum tersedia" description="Jalankan src/matrix_mul_hybrid.py untuk membandingkan Pure MPI vs Hybrid MPI+OpenMP." />;
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={hybridData} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
+            <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="config" tickLine={false} axisLine={false} tick={tick} />
+            <YAxis tick={tick} tickLine={false} axisLine={false} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [formatNumber(value, 2), name]} />
+            <Bar dataKey="gflops" name="Throughput (GFLOPS)" fill={chartColors.compute} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="comm_pct" name="Komunikasi (%)" fill={chartColors.communication} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
     if (!chartData.length)
       return (
         <EmptyState
@@ -167,22 +250,12 @@ export default function Results() {
           description="Pilih dimensi lain atau jalankan eksperimen baru agar metrik muncul di sini."
         />
       );
-    const tick = { fill: "var(--text-muted)", fontSize: 11, fontFamily: "Geist Mono, monospace" };
+
     const shared = (
       <>
         <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="proses" tickLine={false} axisLine={false} tick={tick} />
-        <Tooltip
-          contentStyle={{
-            background: "var(--surface-raised)",
-            border: "1px solid var(--border-strong)",
-            borderRadius: 8,
-            color: "var(--text-main)",
-            fontSize: 12,
-            fontFamily: "Geist Mono, monospace",
-          }}
-          formatter={(value: number, name: string) => [formatNumber(value, 3), name]}
-        />
+        <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [formatNumber(value, 3), name]} />
       </>
     );
 
@@ -193,13 +266,7 @@ export default function Results() {
             {shared}
             <YAxis tick={tick} tickLine={false} axisLine={false} unit="%" />
             <Bar dataKey="comp_percent" name="Komputasi" stackId="a" fill={chartColors.compute} radius={[0, 0, 0, 0]} />
-            <Bar
-              dataKey="comm_percent"
-              name="Komunikasi"
-              stackId="a"
-              fill={chartColors.communication}
-              radius={[4, 4, 0, 0]}
-            />
+            <Bar dataKey="comm_percent" name="Komunikasi" stackId="a" fill={chartColors.communication} radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -214,16 +281,10 @@ export default function Results() {
               tickLine={false}
               axisLine={false}
               scale={scale === "log" ? "log" : "auto"}
-              domain={scale === "log" ? [0.5, "auto"] : [0, "auto"]}
+              domain={scale === "log" ? [0.2, "auto"] : [0, "auto"]}
             />
             <Line dataKey="ideal" name="Ideal S=P" stroke={chartColors.ideal} strokeDasharray="5 5" dot={false} />
-            <Line
-              dataKey="speedup"
-              name="Speedup aktual"
-              stroke={chartColors.total}
-              strokeWidth={2.2}
-              dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.total }}
-            />
+            <Line dataKey="speedup" name="Speedup aktual" stroke={chartColors.total} strokeWidth={2.2} dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.total }} />
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -240,19 +301,8 @@ export default function Results() {
               domain={[0, 1.1]}
               tickFormatter={(value: number) => `${Math.round(value * 100)}%`}
             />
-            <ReferenceLine
-              y={1}
-              stroke={chartColors.ideal}
-              strokeDasharray="5 5"
-              label={{ value: "100%", fill: "var(--text-muted)", fontSize: 11 }}
-            />
-            <Line
-              dataKey="efficiency"
-              name="Efisiensi aktual"
-              stroke={chartColors.compute}
-              strokeWidth={2.2}
-              dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.compute }}
-            />
+            <ReferenceLine y={1} stroke={chartColors.ideal} strokeDasharray="5 5" label={{ value: "100%", fill: "var(--text-muted)", fontSize: 11 }} />
+            <Line dataKey="efficiency" name="Efisiensi aktual" stroke={chartColors.compute} strokeWidth={2.2} dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.compute }} />
           </LineChart>
         </ResponsiveContainer>
       );
@@ -268,27 +318,9 @@ export default function Results() {
             scale={scale === "log" ? "log" : "auto"}
             domain={scale === "log" ? [0.001, "auto"] : [0, "auto"]}
           />
-          <Line
-            dataKey="t_total_s"
-            name="Total"
-            stroke={chartColors.total}
-            strokeWidth={2.2}
-            dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.total }}
-          />
-          <Line
-            dataKey="t_comp_s"
-            name="Komputasi"
-            stroke={chartColors.compute}
-            strokeWidth={1.8}
-            dot={{ r: 3, strokeWidth: 0, fill: chartColors.compute }}
-          />
-          <Line
-            dataKey="t_comm_s"
-            name="Komunikasi"
-            stroke={chartColors.communication}
-            strokeWidth={1.8}
-            dot={{ r: 3, strokeWidth: 0, fill: chartColors.communication }}
-          />
+          <Line dataKey="t_total_s" name="Total" stroke={chartColors.total} strokeWidth={2.2} dot={{ r: 3.5, strokeWidth: 0, fill: chartColors.total }} />
+          <Line dataKey="t_comp_s" name="Komputasi" stroke={chartColors.compute} strokeWidth={1.8} dot={{ r: 3, strokeWidth: 0, fill: chartColors.compute }} />
+          <Line dataKey="t_comm_s" name="Komunikasi" stroke={chartColors.communication} strokeWidth={1.8} dot={{ r: 3, strokeWidth: 0, fill: chartColors.communication }} />
         </LineChart>
       </ResponsiveContainer>
     );
@@ -298,7 +330,7 @@ export default function Results() {
     <div className="page results-page">
       <PageHeader
         title="Hasil benchmark"
-        description="Analisis waktu eksekusi, speedup, efisiensi paralel, dan rasio overhead komunikasi."
+        description="Analisis Strong Scaling (4096×4096), Weak Scaling, Ping-Pong Latency, dan Hybrid MPI+OpenMP."
         actions={
           <>
             <ExportButton label="Unduh CSV" onClick={downloadCsv} />
@@ -343,7 +375,15 @@ export default function Results() {
       <div ref={chartRef}>
         <ChartCard
           title={tabs.find((item) => item.id === tab)?.label ?? "Grafik benchmark"}
-          subtitle={`Matriks ${matrixSize.toLocaleString("id-ID")} × ${matrixSize.toLocaleString("id-ID")} · ${filtered.length} konfigurasi`}
+          subtitle={
+            tab === "weak"
+              ? "Beban FLOPs per proses konstan · N ∝ P^(1/3) (Gustafson's Law)"
+              : tab === "latency"
+                ? "Uji Ping-Pong antar Rank 0 dan Rank 1 · 4 B hingga 64 MB"
+                : tab === "hybrid"
+                  ? "Komparasi Pure MPI vs Hybrid MPI + OpenMP (4096 × 4096)"
+                  : `Matriks ${matrixSize.toLocaleString("id-ID")} × ${matrixSize.toLocaleString("id-ID")} · ${filtered.length} konfigurasi`
+          }
           meta={
             <div className="chart-tabs" role="tablist" aria-label="Jenis grafik">
               {tabs.map((item) => (
@@ -382,14 +422,122 @@ export default function Results() {
       <section className="panel results-table-panel">
         <div className="panel-heading">
           <div>
-            <h2>Tabel metrik</h2>
-            <p>Konfigurasi yang belum dijalankan dapat dipicu langsung dari kolom status</p>
+            <h2>
+              {tab === "weak"
+                ? "Tabel Weak Scaling"
+                : tab === "latency"
+                  ? "Tabel Latency & Bandwidth"
+                  : tab === "hybrid"
+                    ? "Tabel Hybrid MPI + OpenMP"
+                    : "Tabel metrik Strong Scaling"}
+            </h2>
+            <p>
+              {tab === "weak"
+                ? "Perbandingan ukuran matriks dinamis terhadap waktu dan Gustafson speedup"
+                : tab === "latency"
+                  ? "One-way latency (RTT / 2) dan effective bandwidth per ukuran payload"
+                  : tab === "hybrid"
+                    ? "Kombinasi jumlah proses MPI dan thread OpenMP pada matriks 4096 × 4096"
+                    : "Konfigurasi yang belum dijalankan dapat dipicu langsung dari kolom status"}
+            </p>
           </div>
           <span className="table-caption mono">
-            {filtered.length}/{processOptions.length} konfigurasi
+            {tab === "weak"
+              ? `${weakData.length} konfigurasi`
+              : tab === "latency"
+                ? `${latencyData.length} ukuran paket`
+                : tab === "hybrid"
+                  ? `${hybridData.length} skenario`
+                  : `${filtered.length}/${processOptions.length} konfigurasi`}
           </span>
         </div>
-        {rows === null ? (
+
+        {tab === "weak" ? (
+          <div className="table-scroll">
+            <table className="metric-table">
+              <thead>
+                <tr>
+                  <th>Proses</th>
+                  <th>Dimensi N</th>
+                  <th>Total</th>
+                  <th>Komputasi</th>
+                  <th>Komunikasi</th>
+                  <th>Rasio comm</th>
+                  <th>Gustafson S</th>
+                  <th>GFLOPS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weakData.map((r) => (
+                  <tr key={`${r.processes}-${r.matrix_size}`}>
+                    <td><span className="process-pill mono">P={r.processes}</span></td>
+                    <td className="mono">{r.matrix_size.toLocaleString("id-ID")}</td>
+                    <td className="mono">{formatSeconds(r.t_total_s)}</td>
+                    <td className="metric-compute mono">{formatSeconds(r.t_comp_s)}</td>
+                    <td className="metric-comm mono">{formatSeconds(r.t_comm_s)}</td>
+                    <td><span className={`comm-badge mono ${r.comm_percent < 15 ? "low" : r.comm_percent <= 30 ? "medium" : "high"}`}>{formatPercent(r.comm_percent)}</span></td>
+                    <td className="mono strong-cell">{formatNumber(r.gustafson_speedup, 2)}×</td>
+                    <td className="mono">{formatNumber(r.throughput_gflops, 1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : tab === "latency" ? (
+          <div className="table-scroll">
+            <table className="metric-table">
+              <thead>
+                <tr>
+                  <th>Ukuran paket</th>
+                  <th>Bytes</th>
+                  <th>One-Way Latency (µs)</th>
+                  <th>One-Way Latency (ms)</th>
+                  <th>Effective Bandwidth</th>
+                </tr>
+              </thead>
+              <tbody>
+                {latencyData.map((r) => (
+                  <tr key={r.bytes}>
+                    <td className="mono strong-cell">{r.size_label}</td>
+                    <td className="mono muted-cell">{r.bytes.toLocaleString("id-ID")}</td>
+                    <td className="mono">{formatNumber(r.latency_us, 2)} µs</td>
+                    <td className="metric-comm mono">{formatNumber(r.latency_ms, 4)} ms</td>
+                    <td className="metric-compute mono">{formatNumber(r.bandwidth_mbps, 2)} MB/s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : tab === "hybrid" ? (
+          <div className="table-scroll">
+            <table className="metric-table">
+              <thead>
+                <tr>
+                  <th>Konfigurasi</th>
+                  <th>Total Core</th>
+                  <th>Total</th>
+                  <th>Komputasi (OMP)</th>
+                  <th>Komunikasi (MPI)</th>
+                  <th>Rasio comm</th>
+                  <th>Throughput</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hybridData.map((r) => (
+                  <tr key={r.config}>
+                    <td className="mono strong-cell">{r.config}</td>
+                    <td className="mono">{r.total_cores}</td>
+                    <td className="mono">{formatSeconds(r.t_total_s)}</td>
+                    <td className="metric-compute mono">{formatSeconds(r.t_comp_s)}</td>
+                    <td className="metric-comm mono">{formatSeconds(r.t_comm_s)}</td>
+                    <td><span className={`comm-badge mono ${r.comm_pct < 12 ? "low" : r.comm_pct <= 25 ? "medium" : "high"}`}>{formatPercent(r.comm_pct)}</span></td>
+                    <td className="mono strong-cell">{formatNumber(r.gflops, 2)} GFLOPS</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : rows === null ? (
           <Skeleton rows={4} />
         ) : error ? (
           <div className="form-error">{error}. Periksa koneksi backend.</div>

@@ -1,4 +1,4 @@
-# Analisis Waktu Komputasi dan Overhead Komunikasi pada Perkalian Matriks 4096 × 4096 Terdistribusi Menggunakan MPI4Py
+# MPI Matrix Lab — Perkalian Matriks 4096 × 4096 Terdistribusi (MPI4Py + OpenMP)
 
 > **Tugas Besar Ujian Akhir Semester (UAS) Ganjil T.A. 2026/2027**  
 > **Mata Kuliah:** Komputasi Paralel dan Terdistribusi (3 SKS)  
@@ -8,226 +8,125 @@
 
 ---
 
-## 📌 Ringkasan Proyek
+## Ringkasan Proyek
 
-Repositori ini berisi implementasi sistem komputasi terdistribusi berkinerja tinggi (*High-Performance Computing*) untuk perkalian matriks kuadrat berukuran masif ($4096 \times 4096$) menggunakan protokol **Message Passing Interface (MPI)** melalui pustaka **MPI4Py** dan **NumPy (BLAS-accelerated)**. 
+Repositori ini mengimplementasikan sistem **High-Performance Computing (HPC)** untuk perkalian matriks kuadrat berukuran **$4096 \times 4096$** (`float32`, ~64 MB/matriks, $2N^3 \approx 137.44$ GFLOPs) menggunakan **MPI (`mpi4py`)** dan **OpenMP**, lengkap dengan:
 
-Fokus utama proyek ini adalah:
-1. **Dekomposisi Data 1D Row-wise (Block Row Decomposition):** Membagi matriks baris per baris secara proporsional antar worker menggunakan kolektif komunikasi `Scatterv`, `Bcast`, dan `Gatherv`.
-2. **Isolasi dan Analisis Bottleneck Komunikasi:** Mengukur perbandingan waktu komputasi murni ($T_{\text{comp}}$) terhadap waktu overhead komunikasi data ($T_{\text{comm}}$).
-3. **Analisis Skalabilitas (Strong & Weak Scaling):** Menguji variasi proses $P \in \{1, 2, 4, 8, 16\}$ untuk menganalisis hukum Amdahl (*Amdahl's Law*), *Speedup Ratio* ($S$), dan *Parallel Efficiency* ($E$).
-4. **Simulasi Toleransi Kesalahan (Fault Tolerance):** Menguji ketahanan sistem dengan simulasi *node failure* di tengah eksekusi dan mekanisme pemulihan dinamis (*dynamic task rescheduling*).
-
----
-
-## 🏛️ Arsitektur Sistem
-
-Sistem dirancang mengacu pada Bagian B lembar soal UAS:
-
-```
-                  +-----------------------------------+
-                  |    MASTER NODE (Rank 0)           |
-                  | - Task Scheduler & Coordinator    |
-                  | - Matrix Generator & Scatter/Bcast|
-                  | - Result Gathering & Checksum     |
-                  +-----------------+-----------------+
-                                    |
-          +-------------------------+-------------------------+
-          | (MPI_Scatterv Matrix A) | (MPI_Bcast Matrix B)    |
-          v                         v                         v
-+-------------------+     +-------------------+     +-------------------+
-|  WORKER NODE 1    |     |  WORKER NODE 2    |     |  WORKER NODE (P-1)|
-|  (Rank 1)         |     |  (Rank 2)         |     |  (Rank P-1)       |
-| - Local Row A     |     | - Local Row A     |     | - Local Row A     |
-| - Full Matrix B   |     | - Full Matrix B   |     | - Full Matrix B   |
-| - Local Matmul C  |     | - Local Matmul C  |     | - Local Matmul C  |
-+---------+---------+     +---------+---------+     +---------+---------+
-          |                         |                         |
-          +-------------------------+-------------------------+
-                                    |
-                         (MPI_Gatherv Sub-Matrix C)
-                                    v
-                  +-----------------------------------+
-                  |    MASTER NODE (Rank 0)           |
-                  | - Gabungkan Hasil Matrix C        |
-                  | - Hitung Metrik T_comp & T_comm   |
-                  | - Validasi Numerik (Frobenius)    |
-                  +-----------------------------------+
-```
-
-### 1. Master/Coordinator Node (Rank 0)
-* Menginisialisasi Matriks $A$ dan $B$ ($4096 \times 4096$) dengan tipe data `float32` (ukuran memori ~67.11 MB per matriks) menggunakan seed tetap (`seed=42`).
-* Menghitung alokasi baris matriks ($N // P$) untuk setiap worker.
-* Mendistribusikan data ke worker menggunakan buffer C-level MPI (`MPI.FLOAT`).
-* Mengumpulkan kembali submatriks hasil dari seluruh worker ke matriks $C$.
-
-### 2. Worker Node (Rank $1 \dots P-1$ dan Rank 0)
-* Menerima broadcast Matriks $B$ secara utuh.
-* Menerima potongan baris Matriks $A$ lokal ($local\_rows \times 4096$).
-* Menghitung perkalian sub-matriks: $\text{local\_C} = \text{local\_A} \times B$ dengan BLAS teroptimasi (`np.matmul`).
-* Mengirimkan potongan $\text{local\_C}$ kembali ke Master.
-
-### 3. Communication Layer
-* Menggunakan protokol MPI berbasis zero-copy memory buffer protocol:
-  * `comm.Bcast(B, root=0)`: Penyiaran matriks $B$ efisien dengan kompleksitas $O(\log P)$.
-  * `comm.Scatterv`: Pengiriman partisi baris matriks $A$ fleksibel untuk sembarang jumlah $P$.
-  * `comm.Gatherv`: Pengumpulan matriks hasil $C$ kembali ke root.
+1. **Pure MPI 1D Block-Row Decomposition** (`src/matrix_mul_mpi.py`): distribusi `MPI_Bcast`, `MPI_Scatterv`, komputasi lokal, dan `MPI_Gatherv`.
+2. **Hybrid MPI + OpenMP** (`src/matrix_mul_hybrid.py`): perbandingan *Pure MPI* vs *Hybrid Distributed + Shared Memory*.
+3. **Strong Scaling & Weak Scaling ($P \in \{1, 2, 4, 8, 16\}$)** (`src/benchmark_runner.py` & `src/plot_results.py`): pembuktian Hukum Amdahl, Hukum Gustafson, dan *Communication Bottleneck*.
+4. **Ping-Pong Latency & Bandwidth Benchmark** (`src/latency_benchmark.py`): pengukuran *One-Way Latency* (µs/ms) dan *Effective Bandwidth* (MB/s) dari `4 B` hingga `64 MB`.
+5. **Fault Tolerance & Dynamic Task Rescheduling** (`src/fault_tolerance_sim.py`): simulasi 1 worker node crash dengan pemulihan tugas otomatis dan validasi integritas matriks 100%.
+6. **Live Monitoring & Control Dashboard (React + FastAPI)** (`backend/main.py` + `src/`): dashboard web interaktif dengan telemetri CPU/RAM real-time (`psutil`), WebSocket log streaming, dan eksekusi MPI langsung.
+7. **Docker Multi-Node Cluster & Shared Volume** (`Dockerfile` & `docker-compose.yml`): topologi `master-node`, `worker-node-1`, `worker-node-2`, `frontend-ui`, dan volume terdistribusi `/shared_data`.
 
 ---
 
-## 📁 Struktur Direktori
+## Struktur Arsitektur Sistem
+
+```
+                  +-------------------------------------------+
+                  |      MASTER NODE (Rank 0) + FastAPI       |
+                  | - Task Scheduler & Fault Detector         |
+                  | - MPI_Bcast(B) & MPI_Scatterv(A)          |
+                  | - REST API + WebSocket /ws/log + psutil   |
+                  +---------------------+---------------------+
+                                        | (MPI Channel)
+              +-------------------------+-------------------------+
+              v                                                   v
++---------------------------+                       +---------------------------+
+|    WORKER NODE 1 (Rank 1) |                       |   WORKER NODE (P-1)       |
+| - local_A (rows × N)      |                       | - local_A (rows × N)      |
+| - Matrix B cache          |                       | - Matrix B cache          |
+| - OpenMP / BLAS matmul    |                       | - OpenMP / BLAS matmul    |
++-------------+-------------+                       +-------------+-------------+
+              +-------------------------+-------------------------+
+                                        | (MPI_Gatherv C + /shared_data)
+                                        v
+                  +-------------------------------------------+
+                  |  SHARED VOLUME (/shared_data) + REACT UI  |
+                  | - Docker Volume: hpc-shared-storage       |
+                  | - Dashboard Web (Vite + Recharts + KaTeX) |
+                  +-------------------------------------------+
+```
+
+---
+
+## Struktur Direktori
 
 ```text
+├── backend/
+│   └── main.py                  # Server FastAPI (REST + WebSocket log + psutil telemetry)
 ├── src/
-│   ├── matrix_mul_mpi.py      # Program utama perkalian matriks MPI4Py terdistribusi
-│   ├── benchmark_runner.py    # Runner otomatis pengujian multi-core (P = 1, 2, 4, 8, 16)
-│   ├── plot_results.py        # Generator visualisasi grafik performa (300 DPI, IEEE Style)
-│   └── fault_tolerance_sim.py # Simulasi toleransi kegagalan node (Node failure & recovery)
-├── results/                   # Direktori output CSV dan gambar grafik hasil pengujian
-├── requirements.txt           # Daftar dependensi pustaka Python
-├── run_experiments.bat        # Skrip otomatis eksekusi 1-klik untuk Windows
-├── run_experiments.sh         # Skrip otomatis eksekusi 1-klik untuk Linux / WSL / macOS
-└── README.md                  # Dokumentasi teknis proyek
+│   ├── matrix_mul_mpi.py        # Perkalian matriks 4096×4096 Pure MPI (Scatterv/Bcast/Gatherv)
+│   ├── matrix_mul_hybrid.py     # Perkalian matriks Hybrid MPI + OpenMP multithreading
+│   ├── benchmark_runner.py      # Otomasi Strong Scaling & Weak Scaling (P = 1, 2, 4, 8, 16)
+│   ├── latency_benchmark.py     # Uji Ping-Pong Latency & Effective Bandwidth antar-node
+│   ├── fault_tolerance_sim.py   # Simulasi 1 node gagal + Dynamic Task Rescheduling
+│   ├── plot_results.py          # Generator grafik performa 300 DPI (IEEE Style)
+│   ├── components/              # Komponen UI Dashboard React
+│   ├── pages/                   # Halaman Dashboard, Eksperimen, Benchmark, Fault, Arsitektur
+│   ├── data/mock.ts             # Snapshot hasil benchmark aktual untuk mode offline
+│   └── lib/                     # Klien API (api.ts) & utilitas format (utils.ts)
+├── results/                     # Output CSV, log fault tolerance, dan grafik PNG 300 DPI
+├── Dockerfile                   # Image klaster OpenMPI + Python + FastAPI
+├── docker-compose.yml           # Klaster multi-container + shared volume + React UI
+├── run_experiments.bat          # Skrip eksekusi 1-klik (Windows MS-MPI)
+├── run_experiments.sh           # Skrip eksekusi 1-klik (Linux / WSL / OpenMPI)
+└── requirements.txt             # Dependensi Python
 ```
 
 ---
 
-## ⚙️ Persyaratan Sistem & Instalasi
+## Persyaratan & Instalasi
 
-### 1. Kebutuhan Perangkat Lunak
-* Python versi **3.8+** (disarankan 3.10 atau 3.11).
-* Driver MPI terinstal pada sistem operasi:
-  * **Windows:** [Microsoft MPI v10+ (msmpisetup.exe & msmpisdk.msi)](https://www.microsoft.com/en-us/download/details.aspx?id=105289)
-  * **Linux / WSL / Ubuntu:** `sudo apt install libopenmpi-dev openmpi-bin`
+* **Python 3.10+** + **MPI Driver** ([Microsoft MPI](https://www.microsoft.com/en-us/download/details.aspx?id=105289) di Windows atau `sudo apt install libopenmpi-dev openmpi-bin` di Linux/WSL).
+* **Node.js 18+** untuk dashboard React.
 
-### 2. Instalasi Pustaka Python
-Jalankan perintah berikut di terminal:
 ```bash
 pip install -r requirements.txt
-```
-
----
-
-## 🚀 Panduan Eksekusi Program
-
-### A. Eksekusi Skrip 1-Klik (Rekomendasi)
-* **Pada Windows:** Cukup klik dua kali `run_experiments.bat` atau jalankan di Command Prompt / PowerShell:
-  ```cmd
-  .\run_experiments.bat
-  ```
-* **Pada Linux / WSL:**
-  ```bash
-  chmod +x run_experiments.sh
-  ./run_experiments.sh
-  ```
-
----
-
-### B. Menjalankan Modul Secara Manual
-
-#### 1. Uji Tunggal Perkalian Matriks ($4096 \times 4096$)
-Menjalankan perkalian dengan 4 proses MPI:
-* **Windows:**
-  ```powershell
-  mpiexec -n 4 python src/matrix_mul_mpi.py --size 4096 --csv results/benchmark_results.csv --verify
-  ```
-* **Linux / WSL:**
-  ```bash
-  mpirun -n 4 python3 src/matrix_mul_mpi.py --size 4096 --csv results/benchmark_results.csv --verify
-  ```
-
-*Opsi argumen yang tersedia:*
-* `--size <N>` : Dimensi matriks $N \times N$ (default: `4096`).
-* `--seed <S>` : Random seed generator (default: `42`).
-* `--csv <path>`: Jalur file CSV untuk ekspor metrik benchmark.
-* `--verify`   : Validasi numerik dengan perkalian sekuensial NumPy.
-* `--save`     : Simpan matriks hasil $C$ ke file `.npy`.
-
----
-
-#### 2. Uji Skalabilitas Otomatis (Strong Scaling & Weak Scaling)
-Menjalankan variasi $P = 1, 2, 4, 8, 16$ otomatis, menghitung Speedup ($S$), Efisiensi ($E$), dan membuat grafik:
-```bash
-python src/benchmark_runner.py --processes 1 2 4 8 16 --size 4096
-```
-
----
-
-#### 3. Membuat Visualisasi Grafik Hasil Benchmark
-Jika Anda sudah memiliki file `results/benchmark_summary.csv`, grafik dapat di-generate ulang dengan perintah:
-```bash
-python src/plot_results.py --summary-csv results/benchmark_summary.csv --output-dir results
-```
-
-Grafik yang dihasilkan di direktori `results/`:
-1. `execution_time_vs_cores.png` : Kurva Waktu Total, Komputasi ($T_{\text{comp}}$), dan Komunikasi ($T_{\text{comm}}$).
-2. `speedup_analysis.png` : Kurva Speedup aktual vs Ideal Linear Speedup ($S = P$).
-3. `efficiency_analysis.png` : Kurva Efisiensi paralel ($E = S / P \times 100\%$).
-4. `communication_bottleneck.png` : Grafik *Stacked Bar* perbandingan persentase komputasi vs overhead komunikasi (*Communication Bottleneck*).
-
----
-
-#### 4. Uji Simulasi Fault Tolerance (Simulasi 1 Node Gagal)
-Sesuai parameter pengujian F.5 (Simulasi kegagalan node dan pemulihan tugas):
-* **Windows:**
-  ```powershell
-  mpiexec -n 4 python src/fault_tolerance_sim.py --size 2048 --fail-rank 2
-  ```
-* **Linux / WSL:**
-  ```bash
-  mpirun -n 4 python3 src/fault_tolerance_sim.py --size 2048 --fail-rank 2
-  ```
-
----
-
-## 📊 Parameter & Rumus Pengujian Performansi
-
-Sesuai spesifikasi lembar soal (Bagian F):
-
-1. **Speedup Ratio ($S$):**
-   $$S = \frac{T_{\text{sekuensial}}}{T_{\text{paralel}}}$$
-2. **Parallel Efficiency ($E$):**
-   $$E = \frac{S}{P} = \frac{T_{\text{sekuensial}}}{P \times T_{\text{paralel}}}$$
-3. **Throughput (GFLOPS):**
-   Komputasi perkalian matriks $N \times N$ membutuhkan $2N^3$ operasi floating-point:
-   $$\text{GFLOPS} = \frac{2 \times N^3}{T_{\text{total}} \times 10^9}$$
-4. **Communication Overhead Ratio:**
-   $$\% T_{\text{comm}} = \left( \frac{T_{\text{comm}}}{T_{\text{total}}} \right) \times 100\%$$
-
----
-
-## 📝 Kerangka Laporan Akhir (IEEE Style Format)
-
-Gunakan struktur berikut untuk penyusunan laporan UAS sesuai instruksi Bagian C:
-1. **Pendahuluan:** Latar belakang kebutuhan komputasi matriks skala besar, batasan memori/cache CPU sekuensial, rumusan masalah, dan tujuan.
-2. **Kajian Teori:** Konsep Message Passing Interface (MPI), Amdahl's Law, Gustafson's Law, Communication-to-Computation Ratio.
-3. **Metodologi & Arsitektur:** Desain topologi klaster, alokasi memori buffer contiguous, mekanisme komunikasi kolektif (`Scatterv`, `Bcast`, `Gatherv`), dan algoritma dynamic fault recovery.
-4. **Implementasi:** Penjelasan kode utama `matrix_mul_mpi.py` dan alur eksekusi master-worker.
-5. **Pengujian dan Analisis Performansi:** Penyajian tabel data eksperimen $P \in \{1, 2, 4, 8, 16\}$, grafik speedup, grafik efisiensi, grafik breakdown bottleneck komunikasi, serta hasil uji fault tolerance.
-6. **Kesimpulan & Saran:** Rangkuman temuan titik jenuh prosesor (*diminishing returns* akibat overhead komunikasi) dan saran optimasi lanjutan (misal: hybrid MPI+OpenMP atau algoritma Cannon 2D).
-
----
-
-## 🖥️ Dashboard MPI Matrix Lab
-
-Repositori ini juga menyertakan antarmuka web React untuk memantau dan mensimulasikan benchmark:
-
-```bash
 npm install
+```
+
+---
+
+## Panduan Eksekusi
+
+### 1. Menjalankan Seluruh Eksperimen UAS (1-Klik)
+* **Windows:** `.\run_experiments.bat`
+* **Linux / WSL:** `bash run_experiments.sh`
+
+### 2. Menjalankan Modul Secara Mandiri
+```bash
+# Uji tunggal 4096×4096 + validasi numerik
+mpiexec -n 4 python src/matrix_mul_mpi.py --size 4096 --verify
+
+# Uji Latency & Bandwidth (Ping-Pong)
+mpiexec -n 2 python src/latency_benchmark.py
+
+# Uji Hybrid MPI + OpenMP (2 proses MPI × 4 thread OpenMP)
+mpiexec -n 2 python src/matrix_mul_hybrid.py --size 4096 --threads 4
+
+# Uji Strong Scaling & Weak Scaling lengkap (P = 1, 2, 4, 8, 16)
+python src/benchmark_runner.py --processes 1 2 4 8 16 --size 4096
+
+# Simulasi Fault Tolerance (Worker Rank 2 crash)
+mpiexec -n 4 python src/fault_tolerance_sim.py --size 2048 --fail-rank 2
+```
+
+### 3. Menjalankan Dashboard Monitoring Live (React + FastAPI)
+Buka 2 terminal:
+```bash
+# Terminal 1 — Backend FastAPI (eksekusi MPI langsung + telemetri CPU/RAM + WebSocket)
+uvicorn backend.main:app --reload --port 8000
+
+# Terminal 2 — Frontend React
 npm run dev
 ```
+Buka `http://localhost:5173`. Frontend mendeteksi backend FastAPI secara otomatis (`VITE_USE_MOCK=auto`) dan akan menampilkan indikator **Live API** beserta CPU/RAM real-time di sidebar.
 
-Buka alamat lokal yang ditampilkan Vite. Dashboard berjalan menggunakan data mock secara default; tombol eksperimen dan simulasi fault tolerance menggerakkan status, log, progres, serta ringkasan hasil di browser.
-
-### Menghubungkan backend FastAPI
-
-Salin `.env.example` menjadi `.env.local`, lalu atur alamat API:
-
-```env
-VITE_USE_MOCK=false
-VITE_API_BASE_URL=http://localhost:8000
+### 4. Deployment dengan Docker Compose (Shared Volume)
+```bash
+docker compose up --build -d
 ```
-
-Lapisan API berada di `src/lib/api.ts` dan menggunakan endpoint `GET /api/results`, `POST /api/run`, `POST /api/benchmark`, `POST /api/fault`, serta WebSocket `/ws/log`. Sesuaikan payload atau bentuk respons di berkas tersebut bila kontrak backend berbeda. Untuk pengembangan tanpa backend, biarkan `VITE_USE_MOCK=true`.
-
-Build produksi dapat diperiksa dengan `npm run build`.
+Akses Frontend di `http://localhost:5173` dan API Docs di `http://localhost:8000/docs`.

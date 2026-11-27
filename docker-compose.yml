@@ -1,0 +1,71 @@
+services:
+  # Master / Coordinator Node (Rank 0) + FastAPI Monitoring & Control API
+  master-node:
+    build: .
+    container_name: hpc-master-node
+    hostname: master-node
+    volumes:
+      - .:/app
+      - hpc-shared-storage:/shared_data
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ROLE=master
+    networks:
+      - hpc-cluster-net
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+  # Worker Node 1
+  worker-node-1:
+    build: .
+    container_name: hpc-worker-1
+    hostname: worker-1
+    volumes:
+      - .:/app
+      - hpc-shared-storage:/shared_data
+    environment:
+      - NODE_ROLE=worker
+    networks:
+      - hpc-cluster-net
+    command: tail -f /dev/null
+
+  # Worker Node 2
+  worker-node-2:
+    build: .
+    container_name: hpc-worker-2
+    hostname: worker-2
+    volumes:
+      - .:/app
+      - hpc-shared-storage:/shared_data
+    environment:
+      - NODE_ROLE=worker
+    networks:
+      - hpc-cluster-net
+    command: tail -f /dev/null
+
+  # Frontend Dashboard (React + Vite)
+  frontend-ui:
+    image: node:20-alpine
+    container_name: hpc-frontend-ui
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_USE_MOCK=false
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - master-node
+    networks:
+      - hpc-cluster-net
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+volumes:
+  # Shared / Distributed Storage (Bagian B.4 Lembar Soal UAS)
+  hpc-shared-storage:
+    name: hpc-cluster-shared-volume
+
+networks:
+  hpc-cluster-net:
+    driver: bridge

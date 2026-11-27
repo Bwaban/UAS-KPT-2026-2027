@@ -246,122 +246,203 @@ export function ParamForm({
     <fieldset className="param-form" disabled={disabled}>
       <div className="field-block">
         <label className="field-label">Mode eksperimen</label>
-        <div className="segmented">
+        <div className="segmented segmented-4">
           <button
             type="button"
             className={value.mode === "single" ? "selected" : ""}
             onClick={() => change({ mode: "single" })}
           >
-            Uji tunggal
+            Pure MPI
           </button>
           <button
             type="button"
             className={value.mode === "benchmark" ? "selected" : ""}
-            onClick={() => change({ mode: "benchmark" })}
+            onClick={() => change({ mode: "benchmark", processes: [1, 2, 4, 8, 16] })}
           >
-            Benchmark scaling
+            Scaling
+          </button>
+          <button
+            type="button"
+            className={value.mode === "hybrid" ? "selected" : ""}
+            onClick={() => change({ mode: "hybrid", processes: [2], threads: value.threads ?? 4 })}
+          >
+            Hybrid OMP
+          </button>
+          <button
+            type="button"
+            className={value.mode === "latency" ? "selected" : ""}
+            onClick={() => change({ mode: "latency", processes: [2], trials: value.trials ?? 20 })}
+          >
+            Latency
           </button>
         </div>
       </div>
 
-      <div className="field-block">
-        <label className="field-label" htmlFor="matrix-size">
-          Ukuran matriks (N × N)
-        </label>
-        <div className="size-options">
-          {[4096, 2048, 1024].map((size) => (
-            <button
-              type="button"
-              key={size}
-              className={`size-chip mono ${value.size === size ? "selected" : ""}`}
-              onClick={() => change({ size })}
-            >
-              {size.toLocaleString("id-ID")}
-            </button>
-          ))}
-          <label className={`size-chip custom-chip ${![4096, 2048, 1024].includes(value.size) ? "selected" : ""}`}>
-            <span>Kustom</span>
+      {value.mode !== "latency" && (
+        <div className="field-block">
+          <label className="field-label" htmlFor="matrix-size">
+            Ukuran matriks (N × N)
+          </label>
+          <div className="size-options">
+            {[4096, 2048, 1024].map((size) => (
+              <button
+                type="button"
+                key={size}
+                className={`size-chip mono ${value.size === size ? "selected" : ""}`}
+                onClick={() => change({ size })}
+              >
+                {size.toLocaleString("id-ID")}
+              </button>
+            ))}
+            <label className={`size-chip custom-chip ${![4096, 2048, 1024].includes(value.size) ? "selected" : ""}`}>
+              <span>Kustom</span>
+              <input
+                id="matrix-size"
+                aria-label="Ukuran matriks kustom"
+                className="mono"
+                type="number"
+                min="1"
+                value={![4096, 2048, 1024].includes(value.size) ? value.size : ""}
+                placeholder="N"
+                onChange={(event) => change({ size: Math.max(1, Number(event.target.value) || 1) })}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {value.mode !== "latency" && (
+        <div className="field-block">
+          <label className="field-label">
+            {value.mode === "benchmark" ? "Variasi jumlah proses MPI" : "Jumlah proses MPI"}
+          </label>
+          <div className="process-options">
+            {processOptions.map((process) => (
+              <button
+                type="button"
+                key={process}
+                className={`process-chip mono ${value.processes.includes(process) ? "selected" : ""}`}
+                onClick={() => {
+                  if (value.mode === "benchmark") {
+                    const next = value.processes.includes(process)
+                      ? value.processes.filter((item) => item !== process)
+                      : [...value.processes, process].sort((a, b) => a - b);
+                    change({ processes: next.length ? next : [1] });
+                  } else {
+                    change({ processes: [process] });
+                  }
+                }}
+              >
+                P={process}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {value.mode === "hybrid" && (
+        <div className="field-block">
+          <label className="field-label">Thread OpenMP per proses MPI</label>
+          <div className="process-options">
+            {[1, 2, 4, 8].map((t) => (
+              <button
+                type="button"
+                key={t}
+                className={`process-chip mono ${(value.threads ?? 2) === t ? "selected" : ""}`}
+                onClick={() => change({ threads: t })}
+              >
+                T={t} ({(value.processes[0] ?? 2) * t} core)
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {value.mode === "latency" && (
+        <div className="field-block">
+          <label className="field-label">Jumlah pengulangan Ping-Pong per ukuran paket (4 B – 64 MB)</label>
+          <div className="process-options">
+            {[10, 20, 50].map((trials) => (
+              <button
+                type="button"
+                key={trials}
+                className={`process-chip mono ${(value.trials ?? 20) === trials ? "selected" : ""}`}
+                onClick={() => change({ trials })}
+              >
+                {trials} trials
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {value.mode === "single" && (
+        <div className="field-grid">
+          <label className="field-label">
+            Seed
             <input
-              id="matrix-size"
-              aria-label="Ukuran matriks kustom"
-              className="mono"
+              className="text-input mono"
               type="number"
-              min="1"
-              value={![4096, 2048, 1024].includes(value.size) ? value.size : ""}
-              placeholder="N"
-              onChange={(event) => change({ size: Math.max(1, Number(event.target.value) || 1) })}
+              value={value.seed}
+              onChange={(event) => change({ seed: Number(event.target.value) })}
+            />
+          </label>
+          <label className="field-label">
+            Output CSV
+            <input
+              className="text-input mono"
+              value={value.csvPath}
+              onChange={(event) => change({ csvPath: event.target.value })}
             />
           </label>
         </div>
-      </div>
+      )}
 
-      <div className="field-block">
-        <label className="field-label">Jumlah proses MPI</label>
-        <div className="process-options">
-          {processOptions.map((process) => (
-            <button
-              type="button"
-              key={process}
-              className={`process-chip mono ${value.processes.includes(process) ? "selected" : ""}`}
-              onClick={() => {
-                const next = value.processes.includes(process)
-                  ? value.processes.filter((item) => item !== process)
-                  : [...value.processes, process].sort((a, b) => a - b);
-                change({ processes: next.length ? next : [1] });
-              }}
-            >
-              P={process}
-            </button>
-          ))}
+      {value.mode === "single" && (
+        <div className="switch-list">
+          <label className="switch-row">
+            <span>
+              <strong>--verify</strong>
+              <small>Validasi hasil terhadap perkalian sekuensial NumPy</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={value.verify}
+              onChange={(event) => change({ verify: event.target.checked })}
+            />
+            <i />
+          </label>
+          <label className="switch-row">
+            <span>
+              <strong>--save</strong>
+              <small>Simpan matriks hasil C sebagai berkas .npy</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={value.save}
+              onChange={(event) => change({ save: event.target.checked })}
+            />
+            <i />
+          </label>
         </div>
-      </div>
+      )}
 
-      <div className="field-grid">
-        <label className="field-label">
-          Seed
-          <input
-            className="text-input mono"
-            type="number"
-            value={value.seed}
-            onChange={(event) => change({ seed: Number(event.target.value) })}
-          />
-        </label>
-        <label className="field-label">
-          Output CSV
-          <input
-            className="text-input mono"
-            value={value.csvPath}
-            onChange={(event) => change({ csvPath: event.target.value })}
-          />
-        </label>
-      </div>
-
-      <div className="switch-list">
-        <label className="switch-row">
-          <span>
-            <strong>--verify</strong>
-            <small>Validasi hasil terhadap perkalian sekuensial NumPy</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={value.verify}
-            onChange={(event) => change({ verify: event.target.checked })}
-          />
-          <i />
-        </label>
-        <label className="switch-row">
-          <span>
-            <strong>--save</strong>
-            <small>Simpan matriks hasil C sebagai berkas .npy</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={value.save}
-            onChange={(event) => change({ save: event.target.checked })}
-          />
-          <i />
-        </label>
-      </div>
+      {value.mode === "benchmark" && (
+        <div className="switch-list">
+          <label className="switch-row">
+            <span>
+              <strong>Weak scaling (Gustafson)</strong>
+              <small>Jalankan uji weak scaling (N ∝ P^1/3) setelah strong scaling selesai</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={value.weakScaling ?? true}
+              onChange={(event) => change({ weakScaling: event.target.checked })}
+            />
+            <i />
+          </label>
+        </div>
+      )}
     </fieldset>
   );
 }

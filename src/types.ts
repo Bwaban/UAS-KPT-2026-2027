@@ -14,7 +14,60 @@ export interface BenchmarkRow {
   executed?: boolean;
 }
 
-export type RunMode = "single" | "benchmark";
+export interface WeakScalingRow {
+  processes: number;
+  matrix_size: number;
+  t_total_s: number;
+  t_comp_s: number;
+  t_comm_s: number;
+  comp_percent: number;
+  comm_percent: number;
+  throughput_gflops: number;
+  gustafson_speedup: number;
+  weak_efficiency: number;
+}
+
+export interface LatencyRow {
+  bytes: number;
+  size_label: string;
+  latency_us: number;
+  latency_ms: number;
+  bandwidth_mbps: number;
+}
+
+export interface HybridRow {
+  matrix_size: number;
+  mpi_procs: number;
+  omp_threads: number;
+  total_cores: number;
+  t_total_s: number;
+  t_comp_s: number;
+  t_comm_s: number;
+  comp_pct: number;
+  comm_pct: number;
+  gflops: number;
+}
+
+export interface ExtraMetrics {
+  weak_scaling: WeakScalingRow[];
+  latency: LatencyRow[];
+  hybrid: HybridRow[];
+  fault_log: string;
+}
+
+export interface SystemInfo {
+  mpi_available: boolean;
+  mpi_cmd: string;
+  python_version: string;
+  cpu_physical: number;
+  cpu_logical: number;
+  cpu_percent: number;
+  ram_percent: number;
+  ram_used_mb: number;
+  ram_total_mb: number;
+}
+
+export type RunMode = "single" | "benchmark" | "hybrid" | "latency";
 
 export interface ExperimentParams {
   mode: RunMode;
@@ -24,6 +77,9 @@ export interface ExperimentParams {
   csvPath: string;
   verify: boolean;
   save: boolean;
+  threads?: number;
+  weakScaling?: boolean;
+  trials?: number;
 }
 
 export interface RunSummary {

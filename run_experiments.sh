@@ -1,50 +1,34 @@
 #!/usr/bin/env bash
-# ========================================================================================
-# Script Otomasi Eksperimen HPC Perkalian Matriks 4096 x 4096 (Linux / OpenMPI / WSL)
-# UAS Komputasi Paralel dan Terdistribusi 2026/2027 - Universitas Siliwangi
-# ========================================================================================
-
 set -e
 
-echo "==============================================================================="
-echo "  MEMULAI EKSPERIMEN PERKALIAN MATRIKS TERDISTRIBUSI MPI4PY (LINUX / OPENMPI)"
-echo "==============================================================================="
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "$DIR"
 
-# Deteksi mpirun atau mpiexec
-MPI_CMD=""
-if command -v mpirun &> /dev/null; then
-    MPI_CMD="mpirun --oversubscribe"
-elif command -v mpiexec &> /dev/null; then
-    MPI_CMD="mpiexec --oversubscribe"
-else
-    echo "[ERROR] mpirun / mpiexec tidak ditemukan! Silakan install: sudo apt install libopenmpi-dev openmpi-bin"
-    exit 1
+MPI_CMD="mpirun"
+if command -v mpiexec &> /dev/null; then
+    MPI_CMD="mpiexec"
 fi
 
-echo "[*] MPI Command: $MPI_CMD"
+echo "[*] Memeriksa dependensi Python..."
+python3 -m pip install -q -r requirements.txt
 
-# Install dependensi jika perlu
-pip install -r requirements.txt
+echo "[1/5] PENGUJIAN LATENCY & BANDWIDTH (PING-PONG BENCHMARK)"
+$MPI_CMD -n 2 python3 src/latency_benchmark.py
 
-echo ""
-echo "==============================================================================="
-echo "[1/3] MENJALANKAN UJI TUNGGAL (4 PROSES, MATRIKS 4096 x 4096)"
-echo "==============================================================================="
-$MPI_CMD -n 4 python3 src/matrix_mul_mpi.py --size 4096 --csv results/benchmark_results.csv --verify
+echo "[2/5] PENGUJIAN HYBRID MPI + OPENMP (4096 x 4096)"
+rm -f results/hybrid_mpi_openmp_results.csv
+$MPI_CMD -n 4 python3 src/matrix_mul_hybrid.py --size 4096 --threads 1
+$MPI_CMD -n 2 python3 src/matrix_mul_hybrid.py --size 4096 --threads 2
+$MPI_CMD -n 1 python3 src/matrix_mul_hybrid.py --size 4096 --threads 4
+$MPI_CMD -n 2 python3 src/matrix_mul_hybrid.py --size 4096 --threads 4
 
-echo ""
-echo "==============================================================================="
-echo "[2/3] MENJALANKAN BENCHMARK LENGKAP STRONG SCALING (P = 1, 2, 4, 8, 16)"
-echo "==============================================================================="
+echo "[3/5] PENGUJIAN STRONG SCALING & WEAK SCALING (P = 1, 2, 4, 8, 16)"
 python3 src/benchmark_runner.py --processes 1 2 4 8 16 --size 4096
 
-echo ""
-echo "==============================================================================="
-echo "[3/3] MENJALANKAN SIMULASI FAULT TOLERANCE (NODE FAILURE RECOVERY)"
-echo "==============================================================================="
+echo "[4/5] SIMULASI FAULT TOLERANCE (NODE FAILURE & DYNAMIC RESCHEDULING)"
 $MPI_CMD -n 4 python3 src/fault_tolerance_sim.py --size 2048 --fail-rank 2
 
-echo ""
-echo "==============================================================================="
-echo "SELURUH EKSPERIMEN SELESAI! Hasil CSV & Grafik tersimpan di: results/"
-echo "==============================================================================="
+echo "[5/5] GENERATE ULANG VISUALISASI GRAFIK (300 DPI)"
+python3 src/plot_results.py
+
+echo "SELURUH EKSPERIMEN SELESAI! Jalankan backend: uvicorn backend.main:app --port 8000"

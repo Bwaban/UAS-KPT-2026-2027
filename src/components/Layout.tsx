@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Activity, BarChart3, BookOpen, Cpu, PlaySquare, ShieldAlert, LayoutGrid } from "lucide-react";
+import { Activity, BarChart3, BookOpen, Cpu, HardDrive, LayoutGrid, PlaySquare, ShieldAlert } from "lucide-react";
 import type { ReactNode } from "react";
+import { api } from "../lib/api";
+import type { SystemInfo } from "../types";
 import { ThemeToggle } from "./UI";
 
 const menu = [
@@ -31,6 +34,23 @@ export function Layout({
   theme: "dark" | "light";
   onToggleTheme: () => void;
 }) {
+  const [sys, setSys] = useState<(SystemInfo & { live: boolean }) | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const poll = () => {
+      api.getSystem().then((info) => {
+        if (active) setSys(info);
+      });
+    };
+    poll();
+    const timer = window.setInterval(poll, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -59,28 +79,38 @@ export function Layout({
         </nav>
 
         <div className="sidebar-bottom">
-          <section className="mpi-status" aria-label="Status runtime MPI">
+          <section className="mpi-status" aria-label="Status runtime MPI dan telemetri host">
             <div className="status-header">
               <span className="status-indicator" />
               <span>Runtime MPI</span>
-              <span className="status-ok">Siap</span>
+              <span className="status-ok mono">{sys?.live ? "Live API" : "Snapshot"}</span>
             </div>
             <div className="status-row">
               <span>
-                <Activity size={13} strokeWidth={1.6} /> mpiexec
+                <Activity size={13} strokeWidth={1.6} /> Driver
               </span>
-              <strong className="mono">Aktif</strong>
+              <strong className="mono">{sys?.mpi_cmd ?? "mpiexec"}</strong>
             </div>
             <div className="status-row">
               <span>Python</span>
-              <strong className="mono">3.11.8</strong>
+              <strong className="mono">{sys?.python_version ?? "3.11.9"}</strong>
             </div>
             <div className="status-row">
               <span>
-                <Cpu size={13} strokeWidth={1.6} /> Kapasitas
+                <Cpu size={13} strokeWidth={1.6} /> CPU
               </span>
-              <strong className="mono">16 core</strong>
+              <strong className="mono">
+                {sys?.live ? `${sys.cpu_percent}% · ${sys.cpu_logical}T` : `${sys?.cpu_logical ?? 8} core`}
+              </strong>
             </div>
+            {sys?.live && (
+              <div className="status-row">
+                <span>
+                  <HardDrive size={13} strokeWidth={1.6} /> RAM
+                </span>
+                <strong className="mono">{sys.ram_percent}%</strong>
+              </div>
+            )}
           </section>
 
           <div className="sidebar-footer">

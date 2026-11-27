@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, Info, ShieldCheck, TriangleAlert } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSeconds } from "../lib/utils";
@@ -13,6 +13,7 @@ export default function Fault() {
   const [progress, setProgress] = useState(0);
   const [failureTriggered, setFailureTriggered] = useState(false);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [savedLog, setSavedLog] = useState("");
   const [result, setResult] = useState<{
     recovered: boolean;
     integrity: boolean;
@@ -22,6 +23,12 @@ export default function Fault() {
   } | null>(null);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    api.getExtra().then((extra) => {
+      if (extra.fault_log) setSavedLog(extra.fault_log);
+    }).catch(() => {});
+  }, []);
+
   const addEvent = (label: string, tone: "danger" | "success" | "normal", detail: string) =>
     setEvents((current) => [
       ...current,
@@ -30,30 +37,50 @@ export default function Fault() {
 
   const run = async () => {
     setRunning(true);
-    setProgress(0);
+    setProgress(10);
     setResult(null);
     setError("");
     setEvents([]);
     setFailureTriggered(false);
     addEvent("Task dikirim ke worker", "normal", "8 chunk pekerjaan masuk ke antrean");
+    let disconnectLogs: () => void = () => {};
     try {
-      for (let percent = 12; percent <= 96; percent += 12) {
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
-        if (percent === 36) {
-          setFailureTriggered(true);
-          addEvent(`Crash terdeteksi pada Rank ${failRank}`, "danger", "Worker tidak merespons · proses diisolasi");
+      const live = api.isLiveBackend();
+      if (live) {
+        disconnectLogs = api.connectLogs((line) => {
+          if (line.includes("CRASH")) {
+            setFailureTriggered(true);
+            setProgress(48);
+            addEvent(`Crash terdeteksi pada Rank ${failRank}`, "danger", line);
+          } else if (line.includes("[RECOVERY]")) {
+            setProgress(70);
+            addEvent("Task dijadwalkan ulang", "normal", line);
+          }
+        });
+      } else {
+        for (let percent = 12; percent <= 96; percent += 12) {
+          await new Promise((resolve) => window.setTimeout(resolve, 220));
+          if (percent === 36) {
+            setFailureTriggered(true);
+            addEvent(`Crash terdeteksi pada Rank ${failRank}`, "danger", "Worker tidak merespons · proses diisolasi");
+          }
+          if (percent === 48) addEvent("Task ditarik kembali", "normal", "Chunk yang belum selesai dikembalikan ke master");
+          if (percent === 60) addEvent("Task dijadwalkan ulang", "normal", "Pekerjaan dialihkan ke worker aktif");
+          setProgress(percent);
         }
-        if (percent === 48) addEvent("Task ditarik kembali", "normal", "Chunk yang belum selesai dikembalikan ke master");
-        if (percent === 60) addEvent("Task dijadwalkan ulang", "normal", "Pekerjaan dialihkan ke worker aktif");
-        setProgress(percent);
       }
       const output = await api.fault({ size, processes, failRank });
+      setFailureTriggered(true);
       setProgress(100);
       setResult(output);
       addEvent("Semua task selesai", "success", "Matriks C berhasil direkonstruksi dan diverifikasi");
+      api.getExtra().then((extra) => {
+        if (extra.fault_log) setSavedLog(extra.fault_log);
+      }).catch(() => {});
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Simulasi gagal. Periksa konfigurasi lalu coba lagi.");
     } finally {
+      disconnectLogs();
       setRunning(false);
     }
   };
@@ -228,10 +255,37 @@ export default function Fault() {
             )}
           </section>
 
+          {savedLog && (
+            <section className="terminal" aria-label="Log fault tolerance terakhir">
+              <div className="terminal-bar">
+                <span className="mono">results/fault_tolerance_log.txt</span>
+                <span className="mono">ACTUAL MPI LOG</span>
+              </div>
+              <div className="terminal-content">
+                {savedLog.split("\n").map((line, idx) => (
+                  <div
+                    key={idx}
+                    className={
+                      line.includes("ALERT") || line.includes("CRASH")
+                        ? "log-error"
+                        : line.includes("SUKSES") || line.includes("IDENTIK")
+                          ? "log-success"
+                          : ""
+                    }
+                  >
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           <div className="fault-footnote">
             <Info size={14} strokeWidth={1.6} />
             <span>
-              Untuk eksekusi langsung di MPI, jalankan <code>mpiexec -n 4 python src/fault_tolerance_sim.py</code>.
+              {api.isLiveBackend()
+                ? "Terhubung ke backend FastAPI — tombol simulasi mengeksekusi fault_tolerance_sim.py secara langsung."
+                : <>Untuk eksekusi langsung di MPI, jalankan <code>mpiexec -n 4 python src/fault_tolerance_sim.py</code>.</>}
             </span>
           </div>
         </div>

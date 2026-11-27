@@ -178,24 +178,35 @@ export default function Dashboard() {
           </div>
 
           <div className="quick-list">
-            <Link className="quick-action" to="/jalankan">
+            <Link className="quick-action" to="/jalankan" state={{ mode: "hybrid", size: 4096, processes: [2], threads: 4 }}>
               <span className="quick-icon">
                 <Play size={14} strokeWidth={1.7} />
               </span>
               <span>
-                <strong>Uji tunggal tervalidasi</strong>
-                <small className="mono">P=4 · --verify aktif</small>
+                <strong>Hybrid MPI + OpenMP</strong>
+                <small className="mono">2 MPI × 4 OMP · 4096²</small>
               </span>
               <ArrowUpRight size={14} strokeWidth={1.6} />
             </Link>
 
-            <Link className="quick-action" to="/jalankan" state={{ mode: "benchmark", processes: [1, 2, 4, 8, 16] }}>
+            <Link className="quick-action" to="/jalankan" state={{ mode: "benchmark", size: 4096, processes: [1, 2, 4, 8, 16], weakScaling: true }}>
               <span className="quick-icon">
                 <Layers3 size={14} strokeWidth={1.7} />
               </span>
               <span>
-                <strong>Strong scaling penuh</strong>
+                <strong>Strong + Weak scaling</strong>
                 <small className="mono">P=1, 2, 4, 8, 16</small>
+              </span>
+              <ArrowUpRight size={14} strokeWidth={1.6} />
+            </Link>
+
+            <Link className="quick-action" to="/jalankan" state={{ mode: "latency", trials: 20 }}>
+              <span className="quick-icon">
+                <Terminal size={14} strokeWidth={1.7} />
+              </span>
+              <span>
+                <strong>Ping-Pong latency</strong>
+                <small className="mono">4 B – 64 MB · RTT & BW</small>
               </span>
               <ArrowUpRight size={14} strokeWidth={1.6} />
             </Link>
