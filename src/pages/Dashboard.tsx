@@ -3,22 +3,38 @@ import { Link } from "react-router-dom";
 import { ArrowUpRight, Clock3, Layers3, Play, Plus, ShieldAlert, Terminal } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../lib/api";
-import { benchmarkData, chartColors, recentRuns } from "../data/mock";
-import type { BenchmarkRow } from "../types";
+import { benchmarkData, chartColors, recentRuns as fallbackRecentRuns } from "../data/mock";
+import type { BenchmarkRow, RecentRun } from "../types";
 import { formatNumber, formatPercent, formatSeconds } from "../lib/utils";
 import { ChartCard, EmptyState, KpiCard, PageHeader, Skeleton } from "../components/UI";
 
 export default function Dashboard() {
   const [rows, setRows] = useState<BenchmarkRow[] | null>(null);
+  const [recent, setRecent] = useState<RecentRun[]>(fallbackRecentRuns);
   const [error, setError] = useState("");
   useEffect(() => {
     api
       .getResults()
-      .then(setRows)
+      .then((data) => {
+        if (data.length) {
+          const maxSize = Math.max(...data.map((r) => r.matrix_size));
+          setRows(data.filter((r) => r.matrix_size === maxSize));
+        } else {
+          setRows([]);
+        }
+      })
       .catch((reason: Error) => {
         setError(reason.message);
         setRows([]);
       });
+    api
+      .getExtra()
+      .then((extra) => {
+        if (extra.recent_runs && extra.recent_runs.length) {
+          setRecent(extra.recent_runs);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const selected = rows?.length ? rows : benchmarkData;
@@ -256,8 +272,8 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {recentRuns.map((run) => (
-                <tr key={run.id}>
+              {recent.map((run) => (
+                <tr key={`${run.id}-${run.date}`}>
                   <td className="mono strong-cell">{run.id}</td>
                   <td className="mono">
                     {run.size.toLocaleString("id-ID")} × {run.size.toLocaleString("id-ID")}
@@ -278,7 +294,7 @@ export default function Dashboard() {
                   <td>
                     <span className="status-label">Selesai</span>
                   </td>
-                  <td className="muted-cell">{run.date}</td>
+                  <td className="muted-cell mono">{run.date}</td>
                 </tr>
               ))}
             </tbody>

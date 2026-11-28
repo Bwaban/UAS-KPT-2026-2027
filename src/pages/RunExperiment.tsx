@@ -44,6 +44,7 @@ export default function RunExperiment() {
     return state ? { ...initialParams, ...state } : initialParams;
   });
   const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState(-1);
   const [logs, setLogs] = useState<string[]>([]);
@@ -73,15 +74,21 @@ export default function RunExperiment() {
 
   const run = async () => {
     setRunning(true);
+    setElapsed(0);
     setProgress(8);
     setStage(0);
     setSummary(null);
     setError("");
     setLogs([]);
     cancelRef.current = false;
+    const tWallStart = performance.now();
+    const tickTimer = window.setInterval(() => {
+      setElapsed((performance.now() - tWallStart) / 1000);
+    }, 100);
     let disconnectLogs: () => void = () => {};
     try {
-      const live = api.isLiveBackend();
+      const sysInfo = await api.getSystem();
+      const live = sysInfo.live;
       disconnectLogs = api.connectLogs((line) => {
         setLogs((current) => [...current, line]);
         if (line.includes("Inisialisasi") || line.includes("FASE 1")) { setStage(1); setProgress(25); }
@@ -90,7 +97,8 @@ export default function RunExperiment() {
       });
 
       if (live) {
-        append(`[api] Menjalankan langsung di server: ${command}`);
+        append(`[live-mpi] Menjalankan proses asli di CPU: ${command}`);
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
       } else {
         for (let index = 0; index < stageNames.length; index += 1) {
           if (cancelRef.current) {
@@ -129,19 +137,22 @@ export default function RunExperiment() {
         result = await api.run(params);
       }
 
+      const finalWall = (performance.now() - tWallStart) / 1000;
+      setElapsed(finalWall);
       setStage(stageNames.length - 1);
       setProgress(100);
-      setSummary(result);
+      setSummary({ ...result, wall_clock: result.wall_clock ?? Number(finalWall.toFixed(4)) });
       append(
         params.mode === "latency"
-          ? `[✓] Selesai · Latency 64 MB ${formatSeconds(result.total)} · Peak ${formatNumber(result.gflops, 1)} MB/s`
-          : `[✓] Selesai · T_total ${formatSeconds(result.total)} · ${formatNumber(result.gflops, 1)} GFLOPS`,
+          ? `[✓] Selesai · Latency 64 MB ${formatSeconds(result.total)} · Peak ${formatNumber(result.gflops, 1)} MB/s · Wall ${formatSeconds(result.wall_clock ?? finalWall, 2)}`
+          : `[✓] Selesai · T_MPI ${formatSeconds(result.total)} · ${formatNumber(result.gflops, 1)} GFLOPS · Wall ${formatSeconds(result.wall_clock ?? finalWall, 2)}`,
       );
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Terjadi kesalahan saat menjalankan eksperimen.";
       setError(message);
       append(`[galat] ${message}`);
     } finally {
+      window.clearInterval(tickTimer);
       disconnectLogs();
       setRunning(false);
     }
@@ -226,7 +237,9 @@ export default function RunExperiment() {
 
             <div className="progress-caption">
               <span>Progres keseluruhan</span>
-              <strong className="mono">{progress}%</strong>
+              <strong className="mono">
+                {progress}%{elapsed > 0 ? ` · ${elapsed.toFixed(1)} dtk` : ""}
+              </strong>
             </div>
             <ProgressBar value={progress} tone={summary ? "compute" : "accent"} />
           </section>
@@ -241,7 +254,7 @@ export default function RunExperiment() {
               </div>
               <div className="summary-metrics">
                 <div>
-                  <small>{params.mode === "latency" ? "Latency 64 MB" : "Waktu total"}</small>
+                  <small>{params.mode === "latency" ? "Latency 64 MB" : "Waktu MPI (T_total)"}</small>
                   <strong className="mono">{formatSeconds(summary.total)}</strong>
                 </div>
                 <div>
@@ -256,12 +269,23 @@ export default function RunExperiment() {
                   </strong>
                 </div>
                 <div>
-                  <small>Status</small>
-                  <strong className={summary.verified ? "metric-compute" : ""}>
-                    {summary.verified ? "Valid" : "Selesai"}
+                  <small>Wall-clock (init+MPI{summary.seq_time ? "+verify" : ""})</small>
+                  <strong className={summary.verified ? "metric-compute mono" : "mono"}>
+                    {formatSeconds(summary.wall_clock ?? elapsed, 2)}
+                    {summary.verified ? " · Valid" : ""}
                   </strong>
                 </div>
               </div>
+              {summary.seq_time != null && (
+                <p className="helper-text" style={{ marginTop: 10 }}>
+                  <Info size={13} strokeWidth={1.6} />
+                  <span>
+                    Waktu MPI paralel {formatSeconds(summary.total)} vs NumPy sekuensial (--verify){" "}
+                    {formatSeconds(summary.seq_time)} → Speedup verifikasi{" "}
+                    <strong>{formatNumber(summary.seq_time / Math.max(summary.total, 0.0001), 2)}×</strong>.
+                  </span>
+                </p>
+              )}
             </section>
           )}
         </div>

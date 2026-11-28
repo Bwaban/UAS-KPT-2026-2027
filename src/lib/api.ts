@@ -23,22 +23,30 @@ export interface FaultResult {
 }
 
 const ENV_MOCK = import.meta.env.VITE_USE_MOCK;
-const DEFAULT_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  (typeof window !== "undefined" && window.location.port === "8000" ? window.location.origin : "http://localhost:8000")
-).replace(/\/+$/, "");
+
+function isServedByFastApi(): boolean {
+  return typeof window !== "undefined" && window.location.port === "8000";
+}
+
+function getDefaultBaseUrl(): string {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, "");
+  }
+  // Gunakan relative URL saat diakses langsung lewat FastAPI (port 8000) agar bebas masalah IPv4/IPv6 localhost
+  if (isServedByFastApi()) return "";
+  return "http://127.0.0.1:8000";
+}
 
 let mockStore: BenchmarkRow[] = [...benchmarkData];
-let detectedBackendLive: boolean | null = null;
+let detectedBackendLive: boolean | null = isServedByFastApi() ? true : null;
 
 function resolveConfig(options?: ApiOptions) {
-  const baseUrl = (options?.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const baseUrl = (options?.baseUrl ?? getDefaultBaseUrl()).replace(/\/+$/, "");
   if (options?.mock !== undefined) {
     return { useMock: options.mock, baseUrl };
   }
   if (ENV_MOCK === "true") return { useMock: true, baseUrl };
-  if (ENV_MOCK === "false") return { useMock: false, baseUrl };
-  // Auto mode: prefer live FastAPI if reachable, otherwise fall back to embedded real dataset
+  if (ENV_MOCK === "false" || isServedByFastApi()) return { useMock: false, baseUrl };
   return { useMock: detectedBackendLive === false, baseUrl };
 }
 
@@ -117,34 +125,25 @@ async function requestJson<T>(url: string, init?: RequestInit, timeoutMs = 0): P
 
 export const api = {
   isLiveBackend(): boolean {
-    return ENV_MOCK === "false" || detectedBackendLive === true;
+    if (ENV_MOCK === "true") return false;
+    return ENV_MOCK === "false" || isServedByFastApi() || detectedBackendLive === true;
   },
 
   async getSystem(options?: ApiOptions): Promise<SystemInfo & { live: boolean }> {
-    const { useMock, baseUrl } = resolveConfig(options);
-    if (!useMock) {
+    const baseUrl = (options?.baseUrl ?? getDefaultBaseUrl()).replace(/\/+$/, "");
+    const forceMock = options?.mock === true || ENV_MOCK === "true";
+
+    // Selalu coba hubungkan ke backend (tidak pernah terkunci permanen di mode mock)
+    if (!forceMock) {
       try {
-        const info = await requestJson<SystemInfo>(`${baseUrl}/api/system`, undefined, 1500);
+        const info = await requestJson<SystemInfo>(`${baseUrl}/api/system`, undefined, 4000);
         detectedBackendLive = true;
         return { ...info, live: true };
       } catch {
-        if (ENV_MOCK === "false") {
-          return {
-            mpi_available: false,
-            mpi_cmd: "Offline",
-            python_version: "3.11",
-            cpu_physical: 4,
-            cpu_logical: 8,
-            cpu_percent: 0,
-            ram_percent: 0,
-            ram_used_mb: 0,
-            ram_total_mb: 0,
-            live: false,
-          };
-        }
         detectedBackendLive = false;
       }
     }
+
     return {
       mpi_available: true,
       mpi_cmd: "mpiexec (snapshot)",
@@ -166,12 +165,12 @@ export const api = {
         const data = await requestJson<BenchmarkRow[]>(
           `${baseUrl}/api/results?source=${encodeURIComponent(source)}`,
           undefined,
-          2500,
+          5000,
         );
         detectedBackendLive = true;
         return data;
       } catch (err) {
-        if (ENV_MOCK === "false") throw err;
+        if (ENV_MOCK === "false" || isServedByFastApi()) throw err;
         detectedBackendLive = false;
       }
     }
@@ -183,11 +182,11 @@ export const api = {
     const { useMock, baseUrl } = resolveConfig(options);
     if (!useMock) {
       try {
-        const data = await requestJson<ExtraMetrics>(`${baseUrl}/api/extra`, undefined, 2500);
+        const data = await requestJson<ExtraMetrics>(`${baseUrl}/api/extra`, undefined, 5000);
         detectedBackendLive = true;
         return data;
       } catch (err) {
-        if (ENV_MOCK === "false") throw err;
+        if (ENV_MOCK === "false" || isServedByFastApi()) throw err;
         detectedBackendLive = false;
       }
     }
@@ -197,17 +196,12 @@ export const api = {
   async run(params: ExperimentParams, options?: ApiOptions): Promise<RunSummary> {
     const { useMock, baseUrl } = resolveConfig(options);
     if (!useMock) {
-      try {
-        const res = await requestJson<RunSummary>(`${baseUrl}/api/run`, {
-          method: "POST",
-          body: JSON.stringify(params),
-        });
-        detectedBackendLive = true;
-        return res;
-      } catch (err) {
-        if (ENV_MOCK === "false") throw err;
-        detectedBackendLive = false;
-      }
+      const res = await requestJson<RunSummary>(`${baseUrl}/api/run`, {
+        method: "POST",
+        body: JSON.stringify(params),
+      });
+      detectedBackendLive = true;
+      return res;
     }
     const p = params.processes[0] ?? 4;
     const row = estimateRow(params.size, p);
@@ -223,17 +217,12 @@ export const api = {
   async benchmark(params: ExperimentParams, options?: ApiOptions): Promise<BenchmarkRow[]> {
     const { useMock, baseUrl } = resolveConfig(options);
     if (!useMock) {
-      try {
-        const res = await requestJson<BenchmarkRow[]>(`${baseUrl}/api/benchmark`, {
-          method: "POST",
-          body: JSON.stringify(params),
-        });
-        detectedBackendLive = true;
-        return res;
-      } catch (err) {
-        if (ENV_MOCK === "false") throw err;
-        detectedBackendLive = false;
-      }
+      const res = await requestJson<BenchmarkRow[]>(`${baseUrl}/api/benchmark`, {
+        method: "POST",
+        body: JSON.stringify(params),
+      });
+      detectedBackendLive = true;
+      return res;
     }
     const sortedProcesses = [...params.processes].sort((a, b) => a - b);
     const baseSeq = estimateRow(params.size, 1).t_total_s;
@@ -245,17 +234,12 @@ export const api = {
   async hybrid(params: ExperimentParams, options?: ApiOptions): Promise<RunSummary> {
     const { useMock, baseUrl } = resolveConfig(options);
     if (!useMock) {
-      try {
-        const res = await requestJson<RunSummary>(`${baseUrl}/api/hybrid`, {
-          method: "POST",
-          body: JSON.stringify(params),
-        });
-        detectedBackendLive = true;
-        return res;
-      } catch (err) {
-        if (ENV_MOCK === "false") throw err;
-        detectedBackendLive = false;
-      }
+      const res = await requestJson<RunSummary>(`${baseUrl}/api/hybrid`, {
+        method: "POST",
+        body: JSON.stringify(params),
+      });
+      detectedBackendLive = true;
+      return res;
     }
     const p = params.processes[0] ?? 2;
     const t = params.threads ?? 4;
@@ -270,17 +254,12 @@ export const api = {
   async latency(params: ExperimentParams, options?: ApiOptions): Promise<RunSummary> {
     const { useMock, baseUrl } = resolveConfig(options);
     if (!useMock) {
-      try {
-        const res = await requestJson<RunSummary>(`${baseUrl}/api/latency`, {
-          method: "POST",
-          body: JSON.stringify(params),
-        });
-        detectedBackendLive = true;
-        return res;
-      } catch (err) {
-        if (ENV_MOCK === "false") throw err;
-        detectedBackendLive = false;
-      }
+      const res = await requestJson<RunSummary>(`${baseUrl}/api/latency`, {
+        method: "POST",
+        body: JSON.stringify(params),
+      });
+      detectedBackendLive = true;
+      return res;
     }
     const rows = extraMetricsMock.latency;
     const peakBw = Math.max(...rows.map((r) => r.bandwidth_mbps));
@@ -290,17 +269,12 @@ export const api = {
   async fault(params: FaultParams, options?: ApiOptions): Promise<FaultResult> {
     const { useMock, baseUrl } = resolveConfig(options);
     if (!useMock) {
-      try {
-        const res = await requestJson<FaultResult>(`${baseUrl}/api/fault`, {
-          method: "POST",
-          body: JSON.stringify(params),
-        });
-        detectedBackendLive = true;
-        return res;
-      } catch (err) {
-        if (ENV_MOCK === "false") throw err;
-        detectedBackendLive = false;
-      }
+      const res = await requestJson<FaultResult>(`${baseUrl}/api/fault`, {
+        method: "POST",
+        body: JSON.stringify(params),
+      });
+      detectedBackendLive = true;
+      return res;
     }
     const completedBy = Array.from({ length: params.processes - 1 }, (_, i) => i + 1).filter(
       (rank) => rank !== params.failRank,
@@ -315,8 +289,10 @@ export const api = {
     const { useMock, baseUrl } = resolveConfig(options);
     if (useMock) return () => {};
     try {
-      const wsUrl = `${baseUrl.replace(/^http/, "ws")}/ws/log`;
-      const socket = new WebSocket(wsUrl);
+      const wsBase = baseUrl
+        ? baseUrl.replace(/^http/, "ws")
+        : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+      const socket = new WebSocket(`${wsBase}/ws/log`);
       socket.onmessage = (event) => {
         if (typeof event.data === "string") onLine(event.data);
       };

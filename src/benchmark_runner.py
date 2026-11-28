@@ -36,7 +36,10 @@ def parse_arguments():
 def run_single_benchmark(mpi_cmd, p, n, raw_csv):
     python_exec = sys.executable
     script_path = os.path.join(os.path.dirname(__file__), "matrix_mul_mpi.py")
-    cmd = [mpi_cmd, "-n", str(p), python_exec, script_path, "--size", str(n), "--csv", raw_csv, "--quiet"]
+    cmd = [mpi_cmd]
+    if sys.platform != "win32":
+        cmd.append("--oversubscribe")
+    cmd.extend(["-n", str(p), python_exec, script_path, "--size", str(n), "--csv", raw_csv, "--quiet"])
     print(f"[*] Menjalankan: {' '.join(cmd)}", flush=True)
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:

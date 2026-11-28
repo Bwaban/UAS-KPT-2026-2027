@@ -48,11 +48,23 @@ export interface HybridRow {
   gflops: number;
 }
 
+export interface RecentRun {
+  id: string;
+  size: number;
+  processes: number;
+  duration: number;
+  communication: number;
+  gflops?: number;
+  status: string;
+  date: string;
+}
+
 export interface ExtraMetrics {
   weak_scaling: WeakScalingRow[];
   latency: LatencyRow[];
   hybrid: HybridRow[];
   fault_log: string;
+  recent_runs?: RecentRun[];
 }
 
 export interface SystemInfo {
@@ -65,6 +77,8 @@ export interface SystemInfo {
   ram_percent: number;
   ram_used_mb: number;
   ram_total_mb: number;
+  net_sent_mb?: number;
+  net_recv_mb?: number;
 }
 
 export type RunMode = "single" | "benchmark" | "hybrid" | "latency";
@@ -84,6 +98,8 @@ export interface ExperimentParams {
 
 export interface RunSummary {
   total: number;
+  wall_clock?: number;
+  seq_time?: number | null;
   communication: number;
   gflops: number;
   verified: boolean;

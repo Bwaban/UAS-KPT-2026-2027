@@ -45,7 +45,8 @@ export default function Fault() {
     addEvent("Task dikirim ke worker", "normal", "8 chunk pekerjaan masuk ke antrean");
     let disconnectLogs: () => void = () => {};
     try {
-      const live = api.isLiveBackend();
+      const sysInfo = await api.getSystem();
+      const live = sysInfo.live;
       if (live) {
         disconnectLogs = api.connectLogs((line) => {
           if (line.includes("CRASH")) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Activity, BarChart3, BookOpen, Cpu, HardDrive, LayoutGrid, PlaySquare, ShieldAlert } from "lucide-react";
+import { Activity, BarChart3, BookOpen, Cpu, HardDrive, LayoutGrid, Network, PlaySquare, ShieldAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { api } from "../lib/api";
 import type { SystemInfo } from "../types";
@@ -104,12 +104,22 @@ export function Layout({
               </strong>
             </div>
             {sys?.live && (
-              <div className="status-row">
-                <span>
-                  <HardDrive size={13} strokeWidth={1.6} /> RAM
-                </span>
-                <strong className="mono">{sys.ram_percent}%</strong>
-              </div>
+              <>
+                <div className="status-row">
+                  <span>
+                    <HardDrive size={13} strokeWidth={1.6} /> RAM
+                  </span>
+                  <strong className="mono">{sys.ram_percent}%</strong>
+                </div>
+                <div className="status-row">
+                  <span>
+                    <Network size={13} strokeWidth={1.6} /> Net I/O
+                  </span>
+                  <strong className="mono">
+                    ↑{sys.net_sent_mb ?? 0} / ↓{sys.net_recv_mb ?? 0} MB
+                  </strong>
+                </div>
+              </>
             )}
           </section>
 
